@@ -31,3 +31,19 @@ M-ILEA is an automated framework designed to identify, localize, and analyze sel
 git clone [https://github.com/dzikriinzl/M-ILEA.git](https://github.com/dzikriinzl/M-ILEA.git)
 cd M-ILEA
 pip install -r requirements.txt
+
+## 🔧 Recent Changes (2026-02-11)
+
+- The previously separate `HTMLM2Generator` implementation (`core/report/html_m2_generator.py`) was removed to avoid conflicts. The pipeline now uses the single `HTMLReportGenerator` (`core/report/html_generator.py`).
+- M2 integration data (if present) is still supported: `run.py` will include any available M2 report into the generation metadata under the `m2_report` key, so the generator can render related sections without requiring a separate generator class.
+
+### How to run
+Use the standard CLI to run an analysis and produce the HTML dashboard:
+
+```bash
+python3 run.py analyze path/to/app.apk -o results/output_dir --verbose
+```
+
+The generated dashboard will be saved as `results/output_dir/dashboard.html` (or the default results path if `-o` is omitted).
+
+If you relied on `HTMLM2Generator` before, update any automation to call `run.py` as above — the new flow embeds M2 data automatically when available.
