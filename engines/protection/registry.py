@@ -1,0 +1,10 @@
+# engines/protection/registry.py
+
+PROTECTION_CATEGORIES = [
+    "SSL_PINNING",
+    "ROOT_DETECTION",
+    "ANTI_INSTRUMENTATION",
+    "ANTI_TAMPERING",
+    "EMULATOR_DETECTION",
+    "ALVD",
+]
