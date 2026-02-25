@@ -11,7 +11,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .routes import upload, analysis, results, device
 from .services.workspace import WorkspaceManager
@@ -50,7 +51,8 @@ async def lifespan(app: FastAPI):
     logger.info("=== M-ILEA FastAPI Starting ===")
     
     # Initialize workspace manager
-    workspaces_root = Path(__file__).parent.parent.parent.parent / "workspaces"
+    # Workspaces directory lives at the repository root: <repo>/workspaces
+    workspaces_root = Path(__file__).parent.parent.parent / "workspaces"
     workspace_manager = WorkspaceManager(workspaces_root)
     logger.info(f"Workspace root: {workspaces_root}")
     
@@ -150,21 +152,24 @@ app.include_router(device.router, prefix="/api", tags=["ARA & Devices"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ROOT ENDPOINT
+# ROOT ENDPOINT (API-only mode, when no frontend dist is built)
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/")
-async def root():
-    """API root - health check and basic info."""
-    return {
-        "name": "M-ILEA API",
-        "version": "2.0.0",
-        "status": "running",
-        "description": "Mobile Integrated Lifecycle & Evidence Analysis",
-        "tagline": "M-ILEA is not a scanner, but a security reasoning system.",
-        "docs": "/docs",
-        "redoc": "/redoc"
-    }
+_FRONTEND_DIST_CHECK = Path(__file__).parent.parent / "frontend" / "dist"
+
+if not _FRONTEND_DIST_CHECK.is_dir():
+    @app.get("/")
+    async def root():
+        """API root - health check and basic info."""
+        return {
+            "name": "M-ILEA API",
+            "version": "2.0.0",
+            "status": "running",
+            "description": "Mobile Integrated Lifecycle & Evidence Analysis",
+            "tagline": "M-ILEA is not a scanner, but a security reasoning system.",
+            "docs": "/docs",
+            "redoc": "/redoc"
+        }
 
 
 @app.get("/health")
@@ -191,12 +196,40 @@ def get_sessions_store() -> dict:
     return sessions_store
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SPA STATIC FILE SERVING (production / Docker)
+# ═══════════════════════════════════════════════════════════════════════════
+# Serves the built React frontend when web/frontend/dist exists.
+# In dev mode (Vite dev server), this is unused — Vite proxies /api.
+
+_FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+
+if _FRONTEND_DIST.is_dir():
+    # Serve static assets (JS, CSS, images) under /assets
+    app.mount(
+        "/assets",
+        StaticFiles(directory=_FRONTEND_DIST / "assets"),
+        name="static-assets",
+    )
+
+    # Catch-all: serve index.html for any non-API route (SPA client-side routing)
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve the React SPA for any unmatched route."""
+        file_path = _FRONTEND_DIST / full_path
+        # If the exact file exists (e.g. favicon.ico, manifest.json), serve it
+        if full_path and file_path.is_file():
+            return FileResponse(file_path)
+        # Otherwise serve index.html for client-side routing
+        return FileResponse(_FRONTEND_DIST / "index.html")
+
+    logger.info(f"Serving frontend SPA from {_FRONTEND_DIST}")
+else:
+    logger.info("Frontend dist not found — API-only mode (use Vite dev server for frontend)")
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,  # Auto-reload on code changes during development
-        log_level="info"
-    )
+
+    # Run the FastAPI app instance directly to avoid module path issues
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True, log_level="info")

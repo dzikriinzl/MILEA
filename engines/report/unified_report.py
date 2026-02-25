@@ -57,29 +57,54 @@ class UnifiedSecurityReport:
         }
 
     def _build_risk_score(self):
-        score = 0
+        """
+        Normalized 0-100 risk score.
+
+        Formula:
+          raw = sum(severity_weight * confidence) for each vuln
+          max = sum(severity_weight) for each vuln (assuming confidence=1.0)
+          normalized = (raw / max) * 100
+
+        ARA mitigation factor:
+          If anti-tampering is present → raw multiplied by 0.6
+
+        Thresholds: <25 LOW, <50 MEDIUM, <75 HIGH, >=75 CRITICAL
+        """
+        raw_score = 0.0
+        max_score = 0.0
+
+        _weights = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
         for v in self.vulnerabilities:
-            base = {
-                "LOW": 1,
-                "MEDIUM": 3,
-                "HIGH": 7,
-                "CRITICAL": 10,
-            }.get(v["severity"], 0)
+            weight = _weights.get(v["severity"], 0)
+            conf = v.get("confidence", 0.5)
+            raw_score += weight * conf
+            max_score += weight * 1.0
 
-            score += base * v.get("confidence", 0.5)
+        # ARA mitigation: reduce risk if anti-tampering present
+        if self.ara.get("ANTI_TAMPERING", {}).get("present"):
+            raw_score *= 0.6
 
-        if not self.ara.get("ANTI_TAMPERING", {}).get("present"):
-            score += 10
+        if max_score > 0:
+            normalized = (raw_score / max_score) * 100
+        else:
+            normalized = 0.0
+        normalized = min(100.0, max(0.0, normalized))
 
         level = (
-            "LOW" if score < 30 else
-            "MEDIUM" if score < 60 else
-            "HIGH"
+            "CRITICAL" if normalized >= 75 else
+            "HIGH" if normalized >= 50 else
+            "MEDIUM" if normalized >= 25 else
+            "LOW"
         )
 
         self.risk_score = RiskScore(
-            numeric=min(100, int(score)),
+            numeric=round(normalized, 1),
             level=level,
-            explanation="Risk derived from vulnerabilities weighted by ARA posture",
+            explanation=f"Risk {normalized:.0f}/100 — derived from {len(self.vulnerabilities)} "
+                        f"findings weighted by severity×confidence, adjusted by ARA posture",
         )
+
+
+# Backwards-compatibility alias: older code expects `UnifiedReportBuilder`
+UnifiedReportBuilder = UnifiedSecurityReport

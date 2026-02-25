@@ -103,27 +103,32 @@ class UnifiedProtectionProfiler:
         # ==============================================================
         # ANTI-INSTRUMENTATION
         # ==============================================================
-        if anti_instr_posture and (anti_instr_posture.get("present") or anti_instr_posture.get("signal_score", 0) > 0):
+        if anti_instr_posture and anti_instr_posture.get("present"):
+            signal_count = anti_instr_posture.get("signals", 0)
+            subtypes = anti_instr_posture.get("subtypes", [])
+
             diff = self.difficulty.estimate(
                 category="ANTI_INSTRUMENTATION",
-                enforcement_count=anti_instr_posture.get("decision_score", 0),
-                signal_count=anti_instr_posture.get("signal_score", 0),
-                subtypes=list(anti_instr_posture.get("signals", {}).keys()),
+                enforcement_count=anti_instr_posture.get("evidence", 0),
+                signal_count=signal_count,
+                subtypes=subtypes,
             )
 
             profile["ANTI_INSTRUMENTATION"] = {
                 "present": True,
-                "posture": anti_instr_posture.get("posture", "UNKNOWN"),
-                "style": anti_instr_posture.get("style", "UNKNOWN"),
-                "signal_score": anti_instr_posture.get("signal_score", 0),
-                "decision_score": anti_instr_posture.get("decision_score", 0),
-                "signals": anti_instr_posture.get("signals", {}),
+                "confidence": anti_instr_posture.get("confidence", 0.0),
+                "difficulty": diff["difficulty"],
+                "difficulty_score": diff["score"],
+                "difficulty_reasons": diff["reasons"],
+                "subtypes": subtypes,
+                "signal_count": signal_count,
             }
         else:
             profile["ANTI_INSTRUMENTATION"] = {
                 "present": False,
                 "status": "No anti-instrumentation detected",
             }
+
 
         # ==============================================================
         # ANTI-TAMPERING
@@ -164,10 +169,16 @@ class UnifiedProtectionProfiler:
 
             profile["EMULATOR_DETECTION"] = {
                 "present": True,
+                "confidence": emulator.get("confidence", 0.0),
+                "difficulty": diff["difficulty"],
+                "difficulty_score": diff["score"],
+                "difficulty_reasons": diff["reasons"],
                 "posture": emulator.get("posture", "UNKNOWN"),
                 "style": emulator.get("style", "UNKNOWN"),
                 "signal_score": emulator.get("signal_score", 0),
                 "decision_score": emulator.get("decision_score", 0),
+                "evidence_count": emulator.get("evidence_count", emulator.get("signal_score", 0)),
+                "subtypes": emulator.get("subtypes", list(emulator.get("signals", {}).keys())),
                 "signals": emulator.get("signals", {}),
             }
         else:
@@ -180,10 +191,22 @@ class UnifiedProtectionProfiler:
         # ALVD (OPTIONAL)
         # ==============================================================
         if alvd_summary and (alvd_summary.get("present") or alvd_summary.get("signal_score", 0) > 0):
+            alvd_diff = self.difficulty.estimate(
+                category="ALVD",
+                enforcement_count=0,
+                signal_count=alvd_summary.get("signal_score", 0),
+                subtypes=list(alvd_summary.get("signals", {}).keys()),
+            )
             profile["ALVD"] = {
                 "present": True,
+                "confidence": alvd_summary.get("confidence", 0.0),
+                "difficulty": alvd_diff["difficulty"],
+                "difficulty_score": alvd_diff["score"],
+                "difficulty_reasons": alvd_diff["reasons"],
                 "posture": alvd_summary.get("posture", "NONE"),
                 "signal_score": alvd_summary.get("signal_score", 0),
+                "evidence_count": alvd_summary.get("evidence_count", alvd_summary.get("signal_score", 0)),
+                "subtypes": alvd_summary.get("subtypes", list(alvd_summary.get("signals", {}).keys())),
                 "signals": alvd_summary.get("signals", {}),
             }
         else:

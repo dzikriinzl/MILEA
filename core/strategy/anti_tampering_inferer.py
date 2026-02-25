@@ -16,25 +16,25 @@ class AntiTamperingStrategyInferer:
     """
 
     TECHNIQUE_MAP = {
-        "signature": "Signature Verification",
         "signinginfo": "Signature Verification",
-        "getpackageinfo": "Signature Verification",
+        "verifysignature": "Signature Verification",
+        "signaturecheck": "Signature Verification",
 
-        "packagename": "Package Name Integrity",
-        "getpackagename": "Package Name Integrity",
+        "verify_package": "Package Name Integrity",
+        "validatepackagename": "Package Name Integrity",
 
-        "debuggable": "Debuggable Flag Check",
         "flag_debuggable": "Debuggable Flag Check",
+        "debuggable_check": "Debuggable Flag Check",
 
-        "dex": "Code Integrity Verification",
-        "checksum": "Code Integrity Verification",
-        "crc": "Code Integrity Verification",
+        "dexcrc": "Code Integrity Verification",
+        "dexintegrity": "Code Integrity Verification",
+        "dex_checksum": "Code Integrity Verification",
 
-        "asset": "Asset Integrity Protection",
-        "assets/": "Asset Integrity Protection",
+        "apkintegrity": "Asset Integrity Protection",
+        "verifyapk": "Asset Integrity Protection",
 
-        "installer": "Installer Verification",
         "getinstallerpackagename": "Installer Verification",
+        "getinstallsourceinfo": "Installer Verification",
     }
 
     def infer(

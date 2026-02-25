@@ -1,29 +1,35 @@
-from core.localization.pipeline_decision import DecisionLocalizationPipeline
-from core.slicing.decision.smali_root_signal_scanner import SmaliRootSignalScanner
-from core.strategy.anti_instrumentation_signal import AntiInstrumentationSignalScanner
-from core.strategy.emulator_signal import EmulatorSignalScanner
-from core.strategy.alvd_signal import ALVDSignalScanner
+from pathlib import Path
+from typing import List
+
+from core.evidence.base import Evidence
+
+from core.strategy.aggregator import StrategyAggregator
+from core.strategy.unified_profile import UnifiedProtectionProfiler
+
 from core.strategy.anti_instrumentation_posture import AntiInstrumentationPostureAnalyzer
 from core.strategy.emulator_posture import EmulatorDetectionPostureAnalyzer
 from core.strategy.alvd_posture import ALVDPostureAnalyzer
-from engines.protection.strategy_pipeline import StrategyPipeline
-from core.strategy.aggregator import StrategyAggregator
-from core.strategy.unified_profile import UnifiedProtectionProfiler
+
+from core.strategy.anti_instrumentation_signal import AntiInstrumentationSignalScanner
+from core.strategy.emulator_signal import EmulatorSignalScanner
+from core.strategy.alvd_signal import ALVDSignalScanner
 
 
 class ProtectionPipeline:
     """
-    FINAL Protection Pipeline (ARA – M-ILEA)
+    FINAL Protection Pipeline (ARA – CLEAN VERSION)
+
+    Principles:
+    - ONLY defensive mechanisms
+    - NO vulnerability capability leakage
+    - Evidence-driven
     """
 
     def __init__(self):
-        self.decision_pipeline = DecisionLocalizationPipeline()
-        self.strategy_pipeline = StrategyPipeline()
         self.aggregator = StrategyAggregator()
         self.profiler = UnifiedProtectionProfiler()
 
         # Signal scanners
-        self.root_signal_scanner = SmaliRootSignalScanner()
         self.anti_instr_signal_scanner = AntiInstrumentationSignalScanner()
         self.emulator_signal_scanner = EmulatorSignalScanner()
         self.alvd_signal_scanner = ALVDSignalScanner()
@@ -33,107 +39,73 @@ class ProtectionPipeline:
         self.emulator_posture_analyzer = EmulatorDetectionPostureAnalyzer()
         self.alvd_posture_analyzer = ALVDPostureAnalyzer()
 
-    def run(self, smali_root: str):
+    # ------------------------------------------------------------------
+    # Evidence-driven entry point (SINGLE SOURCE OF TRUTH)
+    # ------------------------------------------------------------------
+    def run_from_evidence(self, evidence: List[Evidence]):
+        """
+        Evidence → Protection Profile (ARA)
+        """
 
-        # --------------------------------------------------
-        # 1️⃣ Decision-based flow (QUALIFIED)
-        # --------------------------------------------------
-        decisions = self.decision_pipeline.run_on_smali_dir(smali_root)
-        evidences = self.decision_pipeline.extract_evidence(decisions)
+        # ==============================================================
+        # 1️⃣ ANTI-INSTRUMENTATION
+        # ==============================================================
+        anti_instr_signals = {}
 
-        decision_strategies = self.strategy_pipeline.infer_from_evidence(evidences)
+        for ev in evidence:
+            if ev.type == "NATIVE_SYMBOL" and ev.payload == "ptrace":
+                anti_instr_signals["ptrace"] = anti_instr_signals.get("ptrace", 0) + 1
 
-        # --------------------------------------------------
-        # 2️⃣ Signal-based flow (ROOT) - uses RAW decisions
-        # --------------------------------------------------
-        raw_decisions = self.decision_pipeline.collect_raw_decisions(smali_root)
-        root_signals = []
-
-        for d in raw_decisions:
-            signals = self.root_signal_scanner.scan(
-                smali_lines=d._smali_lines,
-                class_name=d.class_name,
-                method_name=d.method_name,
-            )
-            root_signals.extend(signals)
-
-        signal_strategies = self.strategy_pipeline.infer_from_root_signals(
-            signals=root_signals
-        )
-
-        # --------------------------------------------------
-        # 3️⃣ Anti-Instrumentation Signal Scanner + Posture
-        # --------------------------------------------------
-        anti_instr_signals = self.anti_instr_signal_scanner.scan_smali_dir(smali_root)
-        
-        # Extract anti-instrumentation decisions from evidence
-        anti_instr_decision_types = [
-            ev.decision_type for ev in evidences 
-            if any(s in str(ev.trigger_instruction).lower() + str(ev.evidence_lines).lower() for s in 
-                   ["timing", "debugger", "frida", "ptrace", "tracerpid"])
-        ]
-        
         anti_instr_posture = None
-        # Analyze only if there are signals OR decision types
-        if anti_instr_signals or anti_instr_decision_types:
+        if anti_instr_signals:
             anti_instr_posture = self.anti_instr_posture_analyzer.analyze(
-                signal_freq=anti_instr_signals if anti_instr_signals else {},
-                decision_types=anti_instr_decision_types if anti_instr_decision_types else []
+                signal_freq=anti_instr_signals,
+                decision_types=[]
             )
 
-        # --------------------------------------------------
-        # 4️⃣ Emulator Detection Signal Scanner + Posture
-        # --------------------------------------------------
-        emulator_signals = self.emulator_signal_scanner.scan_smali_dir(smali_root)
-        
-        # Extract emulator-related decisions from evidence
-        emulator_decision_count = sum(
-            1 for ev in evidences 
-            if any(s in str(ev.trigger_instruction).lower() + str(ev.evidence_lines).lower() for s in 
-                   ["fingerprint", "build", "qemu", "emulator", "goldfish", "test-keys"])
-        )
-        
+        # ==============================================================
+        # 2️⃣ EMULATOR DETECTION
+        # ==============================================================
+        emulator_signals = {}
+
+        for ev in evidence:
+            if ev.type.startswith("EMULATOR_"):
+                emulator_signals[ev.payload] = emulator_signals.get(ev.payload, 0) + 1
+
         emulator_posture = None
-        # Analyze only if there are signals OR decision count
-        if emulator_signals or emulator_decision_count > 0:
+        if emulator_signals:
             emulator_posture = self.emulator_posture_analyzer.analyze(
-                signal_summary=emulator_signals if emulator_signals else {},
-                decision_count=emulator_decision_count if emulator_decision_count > 0 else 0,
+                signal_summary=emulator_signals,
+                decision_count=0,
                 termination_count=0
             )
 
-        # --------------------------------------------------
-        # 5️⃣ ALVD (App-Level Virtualization Detection)
-        # --------------------------------------------------
-        alvd_signals = self.alvd_signal_scanner.scan(smali_root)
-        
+        # ==============================================================
+        # 3️⃣ ALVD (OPTIONAL)
+        # ==============================================================
+        alvd_signals = {}
+
+        for ev in evidence:
+            if ev.type == "ALVD_SIGNAL":
+                alvd_signals[ev.payload] = alvd_signals.get(ev.payload, 0) + 1
+
         alvd_posture = None
         if alvd_signals:
             alvd_posture = self.alvd_posture_analyzer.analyze(alvd_signals)
 
-        # --------------------------------------------------
-        # 6️⃣ Aggregate + Profile
-        # --------------------------------------------------
-        all_strategies = decision_strategies + signal_strategies
-
-        aggregated = self.aggregator.aggregate(all_strategies)
-
+        # ==============================================================
+        # 4️⃣ BUILD UNIFIED PROFILE (SINGLE SOURCE OF TRUTH)
+        # ==============================================================
         profile = self.profiler.build(
-            ssl_summary=aggregated.get("SSL_PINNING", {}),
-            root_summary=aggregated.get("ROOT_DETECTION", {}),
-            anti_instr_posture=anti_instr_posture or aggregated.get("ANTI_INSTRUMENTATION", {}),
-            anti_tampering=aggregated.get("ANTI_TAMPERING", {}),
-            emulator=emulator_posture or aggregated.get("EMULATOR_DETECTION", {}),
-            alvd_summary=alvd_posture or aggregated.get("ALVD", {}),
+            ssl_summary={},                # not evidence-driven yet
+            root_summary={},               # not evidence-driven yet
+            anti_instr_posture=anti_instr_posture or {},
+            anti_tampering=None,           # 🔴 EXPLICITLY REMOVED
+            emulator=emulator_posture or {},
+            alvd_summary=alvd_posture or {},
         )
 
         return {
             "profile": profile,
-            "aggregated": aggregated,
-            "strategies": all_strategies,
-            "evidence_count": len(evidences),
-            "root_signal_count": len(root_signals),
-            "anti_instr_signals": len(anti_instr_signals),
-            "emulator_signals": len(emulator_signals),
-            "alvd_signals": len(alvd_signals),
+            "evidence_count": len(evidence),
         }

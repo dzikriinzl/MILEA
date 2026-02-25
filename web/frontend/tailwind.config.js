@@ -1,0 +1,65 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          DEFAULT: '#1A3C5E',
+          50: '#EAF2FB',
+          100: '#D5E5F7',
+          200: '#ABCBEF',
+          300: '#81B1E7',
+          400: '#5797DF',
+          500: '#2E7DD7',
+          600: '#2563A8',
+          700: '#1A3C5E',
+          800: '#143048',
+          900: '#0F2433',
+        },
+        accent: {
+          DEFAULT: '#2E86AB',
+          50: '#EBF6FA',
+          100: '#D7EDF5',
+          200: '#AFDBEB',
+          300: '#87C9E1',
+          400: '#5FB7D7',
+          500: '#2E86AB',
+          600: '#256B89',
+          700: '#1C5067',
+          800: '#133545',
+          900: '#0A1A23',
+        },
+        intelligence: {
+          DEFAULT: '#7B2FBE',
+          50: '#F3EBF9',
+          100: '#E7D7F3',
+          200: '#CFAFE7',
+          300: '#B787DB',
+          400: '#9F5FCF',
+          500: '#7B2FBE',
+          600: '#622698',
+          700: '#4A1C72',
+          800: '#31134C',
+          900: '#190926',
+        },
+        success: '#3BB273',
+        warning: '#F4A261',
+        danger: '#E84855',
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Consolas', 'monospace'],
+      },
+      animation: {
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'bounce-slow': 'bounce 2s infinite',
+      },
+    },
+  },
+  plugins: [],
+}

@@ -29,14 +29,13 @@ class ALVDSignalScanner:
             "multiple accounts",
         ],
         "context_mismatch": [
-            "getapplicationcontext",
             "createpackagecontext",
-            "getbasecontext",
+            "loadedapk.getpackagename",
+            "getbasepackagename",
         ],
         "abnormal_uid": [
-            "uid=",
-            "userId",
-            "process uid",
+            "process.myuid",
+            "userhandle;->getuserid",
         ],
     }
 

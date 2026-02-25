@@ -1,0 +1,40 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# M-ILEA Docker Build — Ignore patterns
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Version control
+.git
+.gitignore
+
+# Virtual environments
+.venv
+mvenv
+__pycache__
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Node (root-level orphan)
+node_modules
+
+# Frontend dependencies (rebuilt in Docker)
+web/frontend/node_modules
+web/frontend/dist
+web/frontend/.vite
+
+# Runtime / cache
+workspaces
+.pytest_cache
+*.pyc
+
+# Docker context itself
+Dockerfile
+docker-compose*.yaml
+.dockerignore
+
+# Documentation / misc
+*.md
+LICENSE

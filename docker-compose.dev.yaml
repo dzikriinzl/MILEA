@@ -1,0 +1,26 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# M-ILEA — Docker Compose Development Override
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up --build
+#
+# Mounts source code for live editing and enables uvicorn auto-reload.
+# Frontend runs via Vite dev server on port 5173 (outside Docker).
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  milea:
+    volumes:
+      - ./adapters:/app/adapters
+      - ./core:/app/core
+      - ./engines:/app/engines
+      - ./web/backend:/app/web/backend
+      - ./workspaces:/app/workspaces
+    command: >
+      python -m uvicorn web.backend.app:app
+      --host 0.0.0.0 --port 8000
+      --reload --log-level debug
+    environment:
+      - MILEA_HOST=0.0.0.0
+      - MILEA_PORT=8000

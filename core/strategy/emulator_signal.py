@@ -15,10 +15,10 @@ class EmulatorSignalScanner:
     SIGNALS = {
         # Build properties
         "build_fingerprint": [
-            "generic",
-            "sdk",
             "goldfish",
             "ranchu",
+            "ro.build.fingerprint",
+            "ro.product.model",
         ],
 
         "test_keys": [

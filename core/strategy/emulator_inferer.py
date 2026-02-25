@@ -12,22 +12,18 @@ class EmulatorDetectionStrategyInferer:
     EMULATOR_ARTIFACTS = {
         "goldfish": "QEMU Hardware",
         "ranchu": "QEMU Hardware",
-        "generic": "Generic Build Fingerprint",
         "sdk_gphone": "AVD Profile",
         "/dev/qemu_pipe": "QEMU Pipe",
         "/dev/socket/qemud": "QEMU Daemon",
-        "emulator": "Emulator Keyword",
         "genymotion": "Genymotion",
-        "vbox": "VirtualBox",
+        "vbox86": "VirtualBox",
         "androvm": "AndroVM",
+        "nox.prop": "NOX Emulator",
     }
 
     BUILD_PROPERTIES = {
-        "ro.product.model": "Build Property Check",
-        "ro.hardware": "Hardware Property Check",
         "ro.kernel.qemu": "QEMU Kernel Flag",
-        "ro.build.fingerprint": "Fingerprint Check",
-        "test-keys": "Test-Keys Build",
+        "init.svc.qemud": "QEMU Daemon Service",
     }
 
     def infer(

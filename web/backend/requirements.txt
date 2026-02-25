@@ -3,34 +3,26 @@
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ── FastAPI & ASGI ───────────────────────────────────────────────────────
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-multipart==0.0.6          # For file uploads
-aiofiles==23.2.1                 # Async file I/O
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6          # For file uploads
+aiofiles>=23.2.1                 # Async file I/O
 
 # ── Data Models & Validation ─────────────────────────────────────────────
-pydantic==2.5.3
-pydantic-settings==2.1.0
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
 
-# ── Session & State Management ───────────────────────────────────────────
-# redis==5.0.1                   # Uncomment for production (persistent sessions)
-# sqlalchemy==2.0.25             # Uncomment for DB-backed sessions
-
-# ── Analysis Pipeline Dependencies (Phase 0 - already implemented) ───────
-# NOTE: These are placeholders - actual dependencies from your existing
-# core/ and engines/ modules should be listed here
+# ── Optional Analysis Dependencies ───────────────────────────────────────
+google-play-scraper>=1.2.7       # Play Store metadata lookup (optional, graceful fallback)
+# androguard>=3.4.0              # Call-graph analysis (optional, large dependency)
 
 # ── External Tools (must be installed system-wide) ──────────────────────
-# apktool (https://ibotpeaches.github.io/Apktool/)
-# jadx (https://github.com/skylot/jadx)
-# bundletool (https://github.com/google/bundletool)
-# adb (Android Debug Bridge - from Android SDK Platform Tools)
+# apktool  — https://ibotpeaches.github.io/Apktool/
+# jadx     — https://github.com/skylot/jadx
+# aapt2    — Android SDK build-tools
+# adb      — Android Debug Bridge (optional, for device analysis)
 
 # ── Testing ──────────────────────────────────────────────────────────────
-pytest==7.4.4
-pytest-asyncio==0.23.3
-httpx==0.26.0                    # For testing FastAPI endpoints
-
-# ── Development ──────────────────────────────────────────────────────────
-black==24.1.1                    # Code formatter
-ruff==0.1.14                     # Fast linter
+pytest>=7.4.4
+pytest-asyncio>=0.23.3
+httpx>=0.26.0                    # For testing FastAPI endpoints

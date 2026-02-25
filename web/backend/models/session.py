@@ -21,6 +21,7 @@ class SessionStatus(str, Enum):
     UPLOADING = "uploading"           # Files being uploaded
     CLASSIFYING = "classifying"       # APK classification in progress
     CLASSIFIED = "classified"         # APKs classified, ready for analysis
+    VALIDATED = "validated"           # Manifest cross-validation passed
     ANALYZING = "analyzing"           # Analysis pipeline running
     COMPLETE = "complete"             # Analysis finished successfully
     ERROR = "error"                   # Error occurred
@@ -114,6 +115,7 @@ class APKManifest(BaseModel):
     version_name: Optional[str] = Field(None, description="Application version name")
     min_sdk: Optional[int] = Field(None, description="Minimum SDK version")
     target_sdk: Optional[int] = Field(None, description="Target SDK version")
+    app_label: Optional[str] = Field(None, description="Application label (resolved from aapt)")
     
     @validator('base_apk', always=True)
     def validate_base_apk(cls, v, values):
@@ -277,6 +279,30 @@ class Session(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════
 # API REQUEST/RESPONSE MODELS
 # ═══════════════════════════════════════════════════════════════════════════
+
+class APKManifestInfoResponse(BaseModel):
+    """Per-APK manifest info extracted by apktool/aapt."""
+    filename: str
+    package_name: Optional[str]
+    version_code: Optional[int]
+    version_name: Optional[str]
+    label: Optional[str]
+    is_base: bool
+    error: Optional[str] = None
+
+
+class APKSetValidationResponse(BaseModel):
+    """Response from the /api/validate/{session_id} endpoint."""
+    session_id: str
+    valid: bool
+    base_package: Optional[str]
+    base_version_code: Optional[int]
+    base_version_name: Optional[str]
+    apk_infos: List[APKManifestInfoResponse]
+    mismatches: List[str]
+    errors: List[str]
+    message: str
+
 
 class SessionCreateResponse(BaseModel):
     """Response after creating a new session."""
