@@ -17,7 +17,7 @@
 
 ## 📋 Overview
 
-**M-ILEA** is an Android security reasoning system that performs deep static analysis of APK files — including Split APK bundles (APKS / XAPK). It combines **OWASP Mobile Top 10** vulnerability detection, **ARA (Adaptive Response Armor)** protection profiling, risk correlation intelligence, and unified reporting into a single automated pipeline.
+**M-ILEA** is an Android security reasoning system that performs deep static analysis of APK files — including Split APK bundles (APKS / XAPK). It combines **OWASP Mobile Top 10** vulnerability detection, **ARA (Application Runtime Analysis)** protection profiling, risk correlation intelligence, and unified reporting into a single automated pipeline.
 
 Upload an APK → M-ILEA decompiles, scans, reasons, correlates, scores, and generates audit-ready reports — all from a modern web interface.
 
@@ -55,10 +55,10 @@ Upload an APK → M-ILEA decompiles, scans, reasons, correlates, scores, and gen
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐      │
 │  │ Ingest   │──▶│ Analyze  │──▶│ Strategy │──▶│  Vuln    │      │
 │  │ (Upload) │   │ (Decomp) │   │  (ARA)   │   │ (OWASP)  │      │
-│  └──────────┘   └──────────┘   └──────────┘   └────┬─────┘      │
-│                                                      │          │
-│                 ┌──────────┐   ┌──────────┐          │          │
-│                 │  Report  │◀──│  Intel   │◀─────────┘          │
+│  └──────────┘   └──────────┘   └──────────┘   └─────┬────┘      │
+│                                                     │           │
+│                 ┌──────────┐   ┌──────────┐         │           │
+│                 │  Report  │◀──│  Intel   │◀────────┘           │
 │                 │ (Output) │   │ (Correl) │                     │
 │                 └──────────┘   └──────────┘                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -172,7 +172,7 @@ That's it — everything else is bundled inside the container.
 ```bash
 # Clone the repository
 git clone https://github.com/dzikriinzl/MILEA.git
-cd M-ILEA
+cd MILEA
 
 # Build and run
 docker compose up --build
@@ -195,7 +195,7 @@ This mounts source code into the container and enables uvicorn auto-reload.
 ```bash
 # Clone
 git clone https://github.com/dzikriinzl/MILEA.git
-cd M-ILEA
+cd MILEA
 
 # Backend
 python -m venv .venv
