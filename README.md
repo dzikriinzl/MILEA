@@ -17,7 +17,7 @@
 
 ## 📋 Overview
 
-**M-ILEA** is an Android security reasoning system that performs deep static analysis of APK files — including Split APK bundles (APKS / XAPK). It combines **OWASP Mobile Top 10** vulnerability detection, **ARA (Application Runtime Analysis)** protection profiling, risk correlation intelligence, and unified reporting into a single automated pipeline.
+**M-ILEA** is an Android security reasoning system that performs deep static analysis of APK files — including Split APK bundles (APKS / XAPK). It combines **OWASP Mobile Top 10** vulnerability detection, **ARA (Adaptive Response Armor)** protection profiling, risk correlation intelligence, and unified reporting into a single automated pipeline.
 
 Upload an APK → M-ILEA decompiles, scans, reasons, correlates, scores, and generates audit-ready reports — all from a modern web interface.
 

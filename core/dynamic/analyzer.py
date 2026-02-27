@@ -73,6 +73,7 @@ class MonkeyResult:
     duration_sec: float = 0.0
     seed: int = 0
     raw_output: str = ""
+    root_block_detected: bool = False   # True when app refused to launch after root detection
 
     def as_dict(self) -> dict:
         return {
@@ -81,6 +82,7 @@ class MonkeyResult:
             "anr_count": self.anr_count,
             "duration_sec": round(self.duration_sec, 1),
             "seed": self.seed,
+            "root_block_detected": self.root_block_detected,
         }
 
 
@@ -259,46 +261,63 @@ class DynamicReport:
 # ---------------------------------------------------------------------------
 
 _LOGCAT_ARA_PATTERNS = {
-    # Root detection — only match when APP explicitly logs detection
-    r"root.*detect|root_check|su.*binary.*check|su.*binary.*found": {
+    # ── Root detection ─────────────────────────────────────────────────────────
+    # Match app-emitted root detection messages (broad: real apps use varied terms)
+    r"root.{0,20}detect|root.{0,15}check|root.{0,10}found|is.?rooted|device.{0,10}root": {
         "category": "ROOT_DETECTION", "subtype": "Root Detection Logged by App",
         "technique": "logcat_root_detect", "confidence": 0.82,
     },
-    r"safetynet.*fail|safetynet.*attest|playintegrity.*fail": {
+    # su binary — paths and check patterns
+    r"su.{0,10}binary|/system/bin/su|/system/xbin/su|/sbin/su|which.{0,5}su": {
+        "category": "ROOT_DETECTION", "subtype": "SU Binary Check Logged",
+        "technique": "logcat_su_binary", "confidence": 0.85,
+    },
+    # RootBeer & common root-check libraries
+    r"rootbeer|check.?root.?method|checkforsu|roothelper|roothide": {
+        "category": "ROOT_DETECTION", "subtype": "Root Check Library Activity Logged",
+        "technique": "logcat_rootcheck_lib", "confidence": 0.80,
+    },
+    # Magisk specific
+    r"magisk.{0,20}(hide|detect|found|bypass)|magisk.manager.{0,15}detect": {
+        "category": "ROOT_DETECTION", "subtype": "Magisk Detection Logged",
+        "technique": "logcat_magisk_detect", "confidence": 0.87,
+    },
+    # SafetyNet / Play Integrity
+    r"safetynet.{0,20}fail|safetynet.{0,20}attest|playintegrity.{0,20}fail|ctsprofile.{0,10}(false|fail)": {
         "category": "ROOT_DETECTION", "subtype": "SafetyNet/PlayIntegrity Failure Logged",
         "technique": "logcat_safetynet", "confidence": 0.85,
     },
 
-    # Anti-instrumentation — only explicit detection messages
-    r"frida.*detect|frida-server.*found|frida.*agent.*detect": {
+    # ── Anti-instrumentation ───────────────────────────────────────────────────
+    r"frida.{0,15}detect|frida.server.{0,10}found|frida.agent.{0,10}detect|frida.gadget": {
         "category": "ANTI_INSTRUMENTATION", "subtype": "Frida Detection Logged by App",
         "technique": "logcat_frida", "confidence": 0.90,
     },
-    r"xposed.*detect|xposed.*found|lsposed.*detect": {
+    r"xposed.{0,15}detect|xposed.{0,10}found|lsposed.{0,10}detect": {
         "category": "ANTI_INSTRUMENTATION", "subtype": "Xposed Detection Logged by App",
         "technique": "logcat_xposed", "confidence": 0.88,
     },
 
-    # Anti-debugging — only explicit debug detection
-    r"debugger.*detected|debug.*attach.*denied|ptrace.*denied": {
+    # ── Anti-debugging ─────────────────────────────────────────────────────────
+    r"debugger.{0,15}detect|debug.{0,10}attach.{0,10}denied|ptrace.{0,10}denied": {
         "category": "ANTI_DEBUGGING", "subtype": "Debug Detection Logged by App",
         "technique": "logcat_debug_detect", "confidence": 0.82,
     },
 
-    # Anti-tampering — only explicit tamper/integrity messages
-    r"signature.*mismatch|tamper.*detect|integrity.*fail|hash.*mismatch": {
+    # ── Anti-tampering ─────────────────────────────────────────────────────────
+    r"signature.{0,15}mismatch|tamper.{0,15}detect|integrity.{0,10}fail|hash.{0,10}mismatch": {
         "category": "ANTI_TAMPERING", "subtype": "Integrity Verification Failure Logged",
         "technique": "logcat_tamper_check", "confidence": 0.80,
     },
 
-    # SSL pinning — only handshake failure (enforcement)
+    # ── SSL pinning ────────────────────────────────────────────────────────────
     r"SSLHandshakeException|CertPathValidatorException|SSLPeerUnverifiedException": {
         "category": "SSL_PINNING", "subtype": "SSL Pinning Enforcement (Handshake Rejected)",
         "technique": "logcat_ssl_pin", "confidence": 0.88,
     },
 
-    # Emulator detection — only explicit detection messages from app
-    r"emulator.*detect|virtual.*device.*detect": {
+    # ── Emulator detection ─────────────────────────────────────────────────────
+    r"emulator.{0,15}detect|virtual.{0,15}device.{0,10}detect": {
         "category": "EMULATOR_DETECTION", "subtype": "Emulator Detection Logged by App",
         "technique": "logcat_emulator", "confidence": 0.80,
     },
@@ -319,9 +338,10 @@ class DynamicAnalyzer:
             report = analyzer.analyze("com.example.app", apk_path="/path/to.apk")
     """
 
-    MONKEY_EVENTS = 10_000
-    MONKEY_THROTTLE_MS = 200      # avoid ghost-touch behaviour on device
+    MONKEY_EVENTS = 3_000
+    MONKEY_THROTTLE_MS = 50       # 50 ms is still ghost-touch safe; 10 k×200 ms was ~10 min
     LOGCAT_CAPTURE_SEC = 30       # seconds to capture logcat during/after Monkey
+    DMESG_LINES = 500             # last N dmesg lines to examine
     DMESG_LINES = 500             # last N dmesg lines to examine
 
     def __init__(self, serial: Optional[str] = None):
@@ -453,7 +473,7 @@ class DynamicAnalyzer:
         monkey_start_ts = ""
         monkey_end_ts = ""
         if run_monkey:
-            _progress(25, f"Running Monkey ({self.MONKEY_EVENTS} events)")
+            _progress(25, f"Running Monkey ({self.MONKEY_EVENTS:,} events, {self.MONKEY_THROTTLE_MS} ms throttle)")
             # Capture timestamp before/after Monkey for logcat correlation
             ts_before = self._adb_shell(serial, "date '+%m-%d %H:%M:%S.000'")
             monkey_start_ts = (ts_before or "").strip()
@@ -461,6 +481,30 @@ class DynamicAnalyzer:
             ts_after = self._adb_shell(serial, "date '+%m-%d %H:%M:%S.000'")
             monkey_end_ts = (ts_after or "").strip()
             report.monkey = monkey_result
+
+            # ── Root-block enforcement finding ──
+            # Only emitted when the app's process was found DEAD (not merely
+            # backgrounded) on MONKEY_CONSECUTIVE_KILLS_REQUIRED consecutive
+            # re-launches AFTER MONKEY_GRACE_BATCHES have passed.
+            # Confidence intentionally modest (0.72): circumstantial signal —
+            # the absence of a running process is consistent with root-detection
+            # enforcement but not proof on its own.
+            if monkey_result.root_block_detected:
+                report.all_findings.append(DynamicFinding(
+                    category="ROOT_DETECTION",
+                    subtype="App Process Dies Repeatedly After Launch (Possible Enforcement)",
+                    technique="monkey_root_enforcement",
+                    source="monkey",
+                    confidence=0.72,
+                    evidence=[
+                        f"App process (pidof) not found on {self.MONKEY_CONSECUTIVE_KILLS_REQUIRED} "
+                        f"consecutive re-launches after grace period ({self.MONKEY_GRACE_BATCHES} batches).",
+                        "Process death occurred immediately after launch — consistent with "
+                        "root-detection enforcement (app calling System.exit / finish() on startup).",
+                        "Note: also check logcat for explicit root-detection log messages which "
+                        "would corroborate this signal.",
+                    ],
+                ))
 
         # [7] Capture logcat (PID-filtered to avoid Magisk/system noise)
         _progress(55, "Capturing logcat output (PID-filtered)")
@@ -737,9 +781,18 @@ class DynamicAnalyzer:
     # ------------------------------------------------------------------
 
     # ── Monkey batching config ──
-    MONKEY_BATCH_SIZE = 2000      # events per batch
-    MONKEY_MAX_BATCHES = 5        # 5 × 2000 = 10 000 total
-    MONKEY_RELAUNCH_WAIT = 1.5    # seconds after re-launching app
+    MONKEY_BATCH_SIZE = 200       # events per batch — small so foreground is checked every ~10 s
+    MONKEY_MAX_BATCHES = 15       # 15 × 200 = 3 000 total
+    MONKEY_RELAUNCH_WAIT = 2.0    # seconds after re-launching app
+    MONKEY_RELAUNCH_RETRIES = 2   # max re-launch attempts per batch
+    # Batches to skip before root-block detection kicks in.
+    # Login, onboarding, and permission dialogs typically finish within the
+    # first few batches (~5 × 200 events = 1 000 events / ~50 s).
+    MONKEY_GRACE_BATCHES = 5
+    # Consecutive dead-process kills required before root-block is flagged.
+    # A single kill is not enough: it could be an ANR kill by the OS or the
+    # user accidentally dismissing the app during login.
+    MONKEY_CONSECUTIVE_KILLS_REQUIRED = 3
 
     def _run_monkey(self, serial: str, package_name: str) -> MonkeyResult:
         """Run Monkey in batches, staying within the target app.
@@ -763,6 +816,8 @@ class DynamicAnalyzer:
         total_injected = 0
         total_crashes = 0
         total_anrs = 0
+        root_block_detected = False  # set True when app refuses to stay open
+        consecutive_dead_kills = 0   # consecutive batches where process was dead after re-launch
 
         for batch_idx in range(num_batches):
             remaining = total_events - total_injected
@@ -770,24 +825,98 @@ class DynamicAnalyzer:
                 break
             batch_events = min(batch_size, remaining)
 
-            # ── Check if app is still in foreground, re-launch if not ──
-            if batch_idx > 0:
-                if not self._is_app_foreground(serial, package_name):
-                    logger.info(f"  [DYN] Monkey batch {batch_idx+1}: app not in foreground — re-launching")
+            # ── Foreground guard — runs before every batch ──
+            if not self._is_app_foreground(serial, package_name):
+
+                # ── Step 1: try to bring it back ──
+                launched = False
+                for attempt in range(self.MONKEY_RELAUNCH_RETRIES):
+                    logger.info(
+                        f"  [DYN] Monkey batch {batch_idx+1}: app not in foreground — "
+                        f"re-launch attempt {attempt+1}/{self.MONKEY_RELAUNCH_RETRIES}"
+                    )
                     self._launch_app(serial, package_name)
                     time.sleep(self.MONKEY_RELAUNCH_WAIT)
+                    if self._is_app_foreground(serial, package_name):
+                        launched = True
+                        break
+
+                if launched:
+                    # App came back — reset consecutive kill counter
+                    consecutive_dead_kills = 0
+                    # continue to inject events normally
+                else:
+                    # ── Step 2: distinguish dead process vs backgrounded ──
+                    # Root-detection enforcement = app KILLS ITSELF immediately
+                    # after launch.  Check pidof:
+                    #   → process dead  → candidate for root-block signal
+                    #   → process alive → app is just in background
+                    #     (login browser tab, OAuth webview, dialog over app, etc.)
+                    #     — abort monkey to avoid system-UI pollution, but do
+                    #       NOT flag as root-enforcement.
+                    pid_after = self._get_pid(serial, package_name)
+
+                    if pid_after is None:
+                        # Process is dead — only count this after grace batches
+                        if batch_idx >= self.MONKEY_GRACE_BATCHES:
+                            consecutive_dead_kills += 1
+                            logger.warning(
+                                f"  [DYN] Batch {batch_idx+1}: app process dead after re-launch "
+                                f"({consecutive_dead_kills}/{self.MONKEY_CONSECUTIVE_KILLS_REQUIRED} "
+                                f"consecutive kills)"
+                            )
+                        else:
+                            logger.info(
+                                f"  [DYN] Batch {batch_idx+1}: app process dead but still in "
+                                f"grace window (batch {batch_idx+1} < {self.MONKEY_GRACE_BATCHES}) — "
+                                f"skipping batch"
+                            )
+                    else:
+                        # Process is alive — probably login/webview/dialog
+                        logger.info(
+                            f"  [DYN] Batch {batch_idx+1}: app in background (PID={pid_after}) — "
+                            f"likely login flow or dialog; not root-enforcement"
+                        )
+                        consecutive_dead_kills = 0  # reset counter
+
+                    # In both cases: abort monkey for this batch to avoid
+                    # injecting events into system UI or a login webview.
+                    if consecutive_dead_kills >= self.MONKEY_CONSECUTIVE_KILLS_REQUIRED:
+                        logger.warning(
+                            f"  [DYN] Monkey aborted: {consecutive_dead_kills} consecutive "
+                            f"dead-process kills — probable root-detection enforcement"
+                        )
+                        root_block_detected = True
+                        self._kill_monkey(serial)
+                        break
+
+                    # Skip batch — but continue loop so we try again next batch
+                    continue
 
             cmd = (
                 f"monkey -p {package_name} "
                 f"--throttle {self.MONKEY_THROTTLE_MS} "
                 f"-s {seed + batch_idx} "
+                # ─ Event type distribution — only safe UI interactions ─
+                # pct-touch=70  : screen taps (stay within app UI)
+                # pct-motion=25 : swipes/gestures
+                # pct-nav=5     : soft-nav (back/home for non-root apps)
+                # pct-majornav=0: NO menu/search key — prevents Quick Settings
+                # pct-syskeys=0 : NO volume/power — prevents screen off
+                # pct-appswitch=0: NO app-switch intent — stays in target app
+                # pct-anyevent=0 : NO raw arbitrary events
+                f"--pct-touch 70 "
+                f"--pct-motion 25 "
+                f"--pct-nav 5 "
+                f"--pct-majornav 0 "
                 f"--pct-syskeys 0 "
                 f"--pct-appswitch 0 "
+                f"--pct-anyevent 0 "
                 f"--ignore-crashes --ignore-timeouts --ignore-security-exceptions "
                 f"-v {batch_events}"
             )
 
-            out = self._adb_shell(serial, cmd, timeout=120) or ""
+            out = self._adb_shell(serial, cmd, timeout=75) or ""
             all_output.append(out)
 
             # Count injected events in this batch
@@ -819,10 +948,20 @@ class DynamicAnalyzer:
             anr_count=total_anrs,
         )
 
+        if root_block_detected:
+            result.raw_output = (
+                f"[M-ILEA] MONKEY ABORTED: App process found dead on "
+                f"{self.MONKEY_CONSECUTIVE_KILLS_REQUIRED} consecutive re-launches "
+                f"after grace period — possible root-detection enforcement.\n"
+                + result.raw_output
+            )
+            result.root_block_detected = True
+
         logger.info(
             f"  [DYN] Monkey: {result.events_sent} events in {num_batches} batches, "
             f"{result.crashes} crashes, {result.anr_count} ANRs, "
             f"{result.duration_sec:.1f}s"
+            + (" [ROOT-BLOCK]" if root_block_detected else "")
         )
         return result
 
@@ -874,6 +1013,17 @@ class DynamicAnalyzer:
                 timeout=self.LOGCAT_CAPTURE_SEC + 10,
             ) or ""
 
+        # ── Secondary: Flutter tag capture (debug-mode Flutter apps log to "flutter" tag) ──
+        # This catches root check results surfaced via dart:developer / debugPrint in debug builds.
+        flutter_out = self._adb_shell(
+            serial,
+            "logcat -s flutter:V -d",
+            timeout=10,
+        ) or ""
+        if flutter_out.strip():
+            logger.info(f"  [DYN] Flutter tag logcat: {len(flutter_out.splitlines())} lines captured")
+            out = out + "\n" + flutter_out
+
         result = LogcatResult(
             total_lines=len(out.splitlines()),
             raw_output=out[:50000],
@@ -884,11 +1034,16 @@ class DynamicAnalyzer:
             "securityexception",
             "sslhandshakeexception", "ssl_pin", "certificate.*pin",
             "tampering", "tamper_detect", "integrity_check",
-            "root_check", "root detection", "su binary",
+            "root_check", "root detection", "root.*check", "is.?rooted",
+            "su binary", "su.{0,5}binary", "/xbin/su", "/bin/su",
+            "rootbeer", "magisk", "roothide",
             "safetynet", "playintegrity", "attestation",
             "frida", "xposed", "substrate",
             "jdwp", "tracerpid", "ptrace_traceme",
             "cloning.*detect", "dualspace",
+            # Flutter-specific security log tags and method channel responses
+            "flutter.*root", "flutter.*jail", "jailbreak",
+            "isdevicerooted", "device_rooted",
             "fatal exception", "shutting down vm",
         )
 
@@ -1271,12 +1426,26 @@ class DynamicAnalyzer:
 
         # Extract unique .so paths
         so_paths = set()
+        is_flutter_app = False
         for line in maps_out.splitlines():
             parts = line.split()
             if len(parts) >= 6:
                 path = parts[-1]
-                if path.endswith(".so") and package_name in path:
-                    so_paths.add(path)
+                if path.endswith(".so"):
+                    # Include app-owned libs AND Flutter-specific libs
+                    if package_name in path:
+                        so_paths.add(path)
+                    # Detect Flutter engine / AOT lib (may not contain package_name)
+                    so_base = os.path.basename(path).lower()
+                    if so_base in ("libflutter.so", "libapp.so"):
+                        is_flutter_app = True
+                        so_paths.add(path)  # always include flutter-specific libs
+
+        if is_flutter_app:
+            logger.info("  [DYN] Flutter app detected via libflutter.so / libapp.so in /proc/maps")
+            if report is not None:
+                report.device_info = report.device_info or {}
+                report.device_info["flutter_app"] = "true"
 
         if not so_paths:
             # Try listing lib directory
@@ -1284,6 +1453,17 @@ class DynamicAnalyzer:
             lib_out = self._adb_shell(serial, f"ls {app_dir}/lib/*/*.so 2>/dev/null")
             if lib_out:
                 so_paths = {l.strip() for l in lib_out.splitlines() if l.strip().endswith(".so")}
+                # Re-detect Flutter in directory listing fallback
+                for p in so_paths:
+                    if os.path.basename(p).lower() in ("libflutter.so", "libapp.so"):
+                        is_flutter_app = True
+                        break
+
+        if is_flutter_app:
+            logger.info(
+                f"  [DYN] Flutter AOT root-check strings will be scanned in "
+                f"{[os.path.basename(p) for p in so_paths if 'libapp' in p.lower() or 'libflutter' in p.lower()]}"
+            )
 
         logger.info(f"  [DYN] Found {len(so_paths)} native .so files")
 
@@ -1319,10 +1499,22 @@ class DynamicAnalyzer:
         "anti_debug", "anti_hook", "anti_tamper", "anti_root",
         "frida", "gum_init", "gum_interceptor",
         "xposed", "substrate", "ms_hookfunction",
-        "is_rooted", "magisk", "su_binary", "root_check",
+        # Root detection — broad set covering JNI + Flutter/Dart AOT strings
+        "is_rooted", "isrooted", "isdevicerooted",
+        "checkroot", "check_root", "checkforsu", "check_for_su",
+        "rootcheck", "rootbeer", "roothide",
+        "magisk", "magiskhide",
+        "su_binary", "su binary", "/xbin/su", "/bin/su", "/sbin/su",
+        "safetynet", "playintegrity", "ctsprofile",
+        # Flutter root/jailbreak library strings
+        "jailbreak_detection", "flutter_jailbreak", "device_rooted",
+        # SSL pinning
         "ssl_pin", "certificate_pin",
+        # Debug / ptrace
         "tracerpid", "ptrace_traceme",
+        # Emulator
         "emulator_detect", "goldfish_detect",
+        # Integrity
         "integrity_check", "signature_verify", "tamper_detect",
     ]
 
@@ -1416,11 +1608,33 @@ class DynamicAnalyzer:
                     metadata={"library": so_name, "device_path": device_path},
                 ))
 
-        # Root detection patterns
+        # Root detection patterns — expanded to cover Java JNI, Flutter Dart AOT (libapp.so),
+        # and popular root-check libraries (RootBeer, SafetyNetHelper, etc.)
         root_patterns = {
-            "/system/bin/su": ("SU Binary Path in .so", "dynamic_native_su", 0.90),
-            "magisk": ("Magisk Reference in .so", "dynamic_native_magisk", 0.88),
-            "is_rooted": ("Root Check Function", "dynamic_native_root_check", 0.85),
+            # SU binary paths (all common locations)
+            "/system/bin/su":       ("SU Binary Path (/system/bin/su)",      "dynamic_native_su",          0.90),
+            "/system/xbin/su":      ("SU Binary Path (/system/xbin/su)",     "dynamic_native_su_xbin",     0.90),
+            "/sbin/su":             ("SU Binary Path (/sbin/su)",             "dynamic_native_su_sbin",     0.88),
+            "/data/local/tmp/su":   ("SU Binary Path (/data/local/tmp/su)",   "dynamic_native_su_tmp",      0.87),
+            "/data/local/su":       ("SU Binary Path (/data/local/su)",       "dynamic_native_su_local",    0.87),
+            # Magisk
+            "magisk":               ("Magisk Reference",                      "dynamic_native_magisk",      0.88),
+            "com.topjohnwu.magisk": ("Magisk Package Reference",              "dynamic_native_magisk_pkg",  0.92),
+            "magiskhide":           ("MagiskHide Reference",                   "dynamic_native_magiskhide",  0.87),
+            # Root check function names (JNI / Dart AOT)
+            "is_rooted":            ("is_rooted() Function",                   "dynamic_native_root_check",  0.85),
+            "isrooted":             ("isRooted() Method String",               "dynamic_native_isrooted",    0.84),
+            "isdevicerooted":       ("isDeviceRooted() Method String",         "dynamic_native_isdevicerooted", 0.84),
+            "checkforsu":           ("checkForSu() Method String",             "dynamic_native_checkforsu",  0.85),
+            "check_for_su":         ("check_for_su Function",                  "dynamic_native_check_for_su",0.85),
+            "rootbeer":             ("RootBeer Library Reference",             "dynamic_native_rootbeer",    0.87),
+            "roothide":             ("RootHide Reference",                     "dynamic_native_roothide",    0.86),
+            # SafetyNet / PlayIntegrity
+            "safetynet":            ("SafetyNet Reference",                    "dynamic_native_safetynet",   0.83),
+            "ctsprofile":           ("CTS Profile Check Reference",            "dynamic_native_cts",         0.83),
+            # Flutter-specific root/jailbreak detection libraries
+            "jailbreak_detection":  ("Flutter Jailbreak Detection Library",    "dynamic_native_flutter_jail",0.87),
+            "device_rooted":        ("device_rooted String (Flutter/Dart)",    "dynamic_native_flutter_root",0.85),
         }
 
         for pattern, (subtype, technique, conf) in root_patterns.items():

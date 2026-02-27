@@ -120,6 +120,7 @@ class UnifiedHTMLReportGenerator:
             summary_data=summary_data,
             raw_signals=raw_signals,
             aggregated=aggregated,
+            risk=risk,
         )
 
     # ────────────────────────────────────────────────────────────────────────
@@ -351,6 +352,24 @@ class UnifiedHTMLReportGenerator:
         if not grouped:
             return '<p style="color:#94a3b8;padding:16px;">No high-confidence evidence found.</p>'
 
+        # ── Column widths (fixed layout — prevents uneven stretching) ──
+        # Source:60  Technique:175  File:200  Class:130  Method:110  Line:48  Snippet:rest(≥220)
+        _colgroup = (
+            '<colgroup>'
+            '<col style="width:60px;">'
+            '<col style="width:175px;">'
+            '<col style="width:200px;">'
+            '<col style="width:130px;">'
+            '<col style="width:110px;">'
+            '<col style="width:48px;">'
+            '<col style="min-width:220px;">'
+            '</colgroup>'
+        )
+
+        _cell = (
+            'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+        )
+
         def _build_row(f: dict) -> str:
             source  = f.get("source", "smali")
             tech    = f.get("technique", f.get("subtype", ""))
@@ -361,36 +380,47 @@ class UnifiedHTMLReportGenerator:
             snippet = f.get("code_snippet", "")
             if isinstance(snippet, list):
                 snippet = "\n".join(snippet[:5])
+            # Truncate very long snippets (SSL XML configs can be hundreds of chars)
+            snippet_display = snippet[:300] if snippet else ""
             snip_html = (
-                f'<pre style="font-family:\'JetBrains Mono\',monospace;font-size:11px;'
+                f'<pre style="font-family:\'JetBrains Mono\',monospace;font-size:10px;'
                 f'color:#475569;background:#f8fafc;border:1px solid #e2e8f0;'
-                f'padding:6px 8px;border-radius:4px;margin:0;overflow-x:auto;'
-                f'max-width:400px;white-space:pre-wrap;word-break:break-all;">{snippet[:200]}</pre>'
-                if snippet else '<span style="color:#cbd5e1;">—</span>'
+                f'padding:5px 7px;border-radius:4px;margin:0;'
+                f'white-space:pre-wrap;word-break:break-all;line-height:1.45;">'
+                f'{snippet_display}</pre>'
+                if snippet_display else '<span style="color:#cbd5e1;font-size:11px;">—</span>'
             )
             short_cls = cls_.split(".")[-1] if "." in cls_ else cls_
             if "/" in short_cls:
                 short_cls = short_cls.rsplit("/", 1)[-1]
+            # Truncate long technique names (e.g. network_security_config_cleartext_permitted)
+            tech_display = (tech[:28] + "…") if len(tech) > 30 else tech
             return (
-                f'<tr style="border-bottom:1px solid #f1f5f9;">'
-                f'<td style="padding:8px 12px;">{self._source_badge(source)}</td>'
-                f'<td style="padding:8px 12px;font-size:12px;color:#2563eb;font-weight:600;">{tech}</td>'
-                f'<td style="padding:8px 12px;font-family:\'JetBrains Mono\',monospace;font-size:10px;'
-                f'color:#475569;word-break:break-all;max-width:260px;" title="{file_}">{file_}</td>'
-                f'<td style="padding:8px 8px;font-family:monospace;font-size:10px;color:#64748b;'
-                f'max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{cls_}">{short_cls}</td>'
-                f'<td style="padding:8px 12px;font-family:monospace;font-size:10px;color:#94a3b8;">{meth_}</td>'
-                f'<td style="padding:8px 12px;font-size:12px;color:#0f172a;font-weight:600;">{line_}</td>'
-                f'<td style="padding:8px 12px;">{snip_html}</td>'
+                f'<tr style="border-bottom:1px solid #f1f5f9;vertical-align:top;">'
+                f'<td style="padding:7px 8px;">{self._source_badge(source)}</td>'
+                f'<td style="padding:7px 10px;font-size:11px;color:#2563eb;font-weight:600;'
+                f'{_cell}" title="{tech}">{tech_display}</td>'
+                f'<td style="padding:7px 10px;font-family:\'JetBrains Mono\',monospace;font-size:10px;'
+                f'color:#475569;{_cell}" title="{file_}">{file_}</td>'
+                f'<td style="padding:7px 8px;font-family:monospace;font-size:10px;color:#64748b;'
+                f'{_cell}" title="{cls_}">{short_cls}</td>'
+                f'<td style="padding:7px 10px;font-family:monospace;font-size:10px;color:#94a3b8;'
+                f'{_cell}" title="{meth_}">{meth_}</td>'
+                f'<td style="padding:7px 8px;font-size:11px;color:#0f172a;font-weight:700;'
+                f'text-align:center;">{line_}</td>'
+                f'<td style="padding:7px 8px;">{snip_html}</td>'
                 f'</tr>'
             )
 
-        _th_style = ('padding:10px 12px;text-align:left;font-size:10px;color:#94a3b8;'
-                     'text-transform:uppercase;letter-spacing:.07em;font-weight:600;')
+        _th_style = (
+            'padding:9px 10px;text-align:left;font-size:10px;color:#94a3b8;'
+            'text-transform:uppercase;letter-spacing:.07em;font-weight:700;'
+            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+        )
         _thead = (
-            '<thead><tr style="background:#f8fafc;">'
+            '<thead><tr style="background:#f8fafc;position:sticky;top:0;z-index:1;">'
             + ''.join(f'<th style="{_th_style}">{h}</th>'
-                      for h in ['Source','Technique','File Path','Class','Method','Line','Code Snippet'])
+                      for h in ['Src', 'Technique', 'File Path', 'Class', 'Method', 'Ln', 'Code Snippet'])
             + '</tr></thead>'
         )
 
@@ -427,11 +457,13 @@ class UnifiedHTMLReportGenerator:
                 f'transition:transform .2s;">▶</span>'
                 f'</div>'
                 f'</summary>'
-                f'<div style="overflow-x:auto;padding:16px 20px;margin-top:-1px;background:#fafbfc;'
-                f'border:1px solid #e2e8f0;border-top:0;border-radius:0 0 12px 12px;'
-                f'max-height:500px;overflow-y:auto;">'
-                f'<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-                f'{_thead}<tbody>{rows_html}{truncated}</tbody></table></div>'
+                f'<div style="overflow-x:auto;padding:0 0 16px 0;margin-top:-1px;background:#fafbfc;'
+                f'border:1px solid #e2e8f0;border-top:0;border-radius:0 0 12px 12px;">'
+                f'<div style="max-height:460px;overflow-y:auto;padding:16px 20px 0 20px;">'
+                f'<table style="width:100%;min-width:1020px;border-collapse:collapse;'
+                f'table-layout:fixed;font-size:12px;">'
+                f'{_colgroup}{_thead}<tbody>{rows_html}{truncated}</tbody></table>'
+                f'</div></div>'
                 f'</details>'
             )
 
@@ -2774,7 +2806,7 @@ class UnifiedHTMLReportGenerator:
               total_vulns, high_vulns, evidence_count,
               ara, findings, corr, chart_data,
               summary_data=None, raw_signals=None,
-              aggregated=None) -> str:
+              aggregated=None, risk=None) -> str:
 
         ara_section = self._render_ara_section(ara)
         evid_table  = self._render_evidence_table(findings)
@@ -2804,6 +2836,46 @@ class UnifiedHTMLReportGenerator:
         }.get(level, "#7c3aed")
 
         score_display = round(score, 1)
+
+        # ── Risk score breakdown tooltip (from engine explanation) ──
+        risk = risk or {}
+        risk_breakdown   = risk.get("breakdown", [])
+        risk_explanation = risk.get("explanation", [])
+        _sev_dot = {"CRITICAL": "#dc2626", "HIGH": "#ea580c",
+                    "MEDIUM": "#d97706", "LOW": "#2563eb"}
+        if risk_breakdown:
+            bk_rows = "".join(
+                f'<tr style="border-bottom:1px solid #f1f5f9;font-size:11px;">'
+                f'<td style="padding:4px 8px;font-weight:600;color:#0f172a;">{b.get("owasp_id","")}</td>'
+                f'<td style="padding:4px 8px;">'
+                f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+                f'background:{_sev_dot.get(b.get("severity",""),"#94a3b8")};margin-right:4px;"></span>'
+                f'{b.get("severity","")}</td>'
+                f'<td style="padding:4px 8px;color:#64748b;">{int(b.get("confidence",0)*100)}%</td>'
+                f'<td style="padding:4px 8px;color:#64748b;font-size:10px;">{b.get("mitigation_status","")}</td>'
+                f'<td style="padding:4px 8px;font-weight:700;color:#0f172a;">{b.get("score",0):.2f}</td>'
+                f'</tr>'
+                for b in risk_breakdown
+            )
+            bk_summary = risk_explanation[0] if risk_explanation else ""
+            risk_breakdown_html = (
+                f'<details style="margin-top:10px;">'
+                f'<summary style="cursor:pointer;font-size:10px;color:#64748b;list-style:none;'
+                f'user-select:none;letter-spacing:.04em;">&#9654; Score Breakdown</summary>'
+                f'<div style="margin-top:8px;overflow-x:auto;">'
+                f'<p style="font-size:10px;color:#94a3b8;margin-bottom:6px;">{bk_summary}</p>'
+                f'<table style="width:100%;border-collapse:collapse;">'
+                f'<thead><tr style="background:#f8fafc;">'
+                f'<th style="padding:3px 8px;font-size:9px;color:#94a3b8;text-align:left;">OWASP</th>'
+                f'<th style="padding:3px 8px;font-size:9px;color:#94a3b8;text-align:left;">Sev</th>'
+                f'<th style="padding:3px 8px;font-size:9px;color:#94a3b8;text-align:left;">Conf</th>'
+                f'<th style="padding:3px 8px;font-size:9px;color:#94a3b8;text-align:left;">Mitigation</th>'
+                f'<th style="padding:3px 8px;font-size:9px;color:#94a3b8;text-align:left;">Pts</th>'
+                f'</tr></thead>'
+                f'<tbody>{bk_rows}</tbody></table></div></details>'
+            )
+        else:
+            risk_breakdown_html = ""
 
         hero_html = self._render_hero_metadata(
             app_name, pkg, now, file_name, file_size,
@@ -2946,6 +3018,7 @@ class UnifiedHTMLReportGenerator:
       <div class="stat-val" style="color:{risk_color};">{score_display}</div>
       <div class="stat-label">Risk Score</div>
       <div class="stat-sub" style="color:{risk_color};font-weight:700;">{level}</div>
+      {risk_breakdown_html}
     </div>
     <div class="stat-card" style="border-top:3px solid #16a34a;">
       <div class="stat-val" style="color:#16a34a;">{ara_count}</div>
