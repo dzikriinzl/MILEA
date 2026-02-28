@@ -9,35 +9,50 @@ class AntiTamperingSignalScanner:
     """
 
     SIGNAL_KEYWORDS = {
+        # getpackageinfo is used by nearly every Android app for version checks,
+        # icon loading, permissions, timestamps, etc. — NOT sufficient on its own.
+        # "signatures" is a field name but appears in unrelated contexts too.
+        # Only keeping the more specific API names that imply self-verification.
         "signature_check": [
-            "getpackageinfo",
-            "signatures",
             "signinginfo",
+            "hassigningcertificate",
             "getapksignature",
+            "verify_apk_signature",
         ],
         "dex_checksum": [
-            "dexfile",
-            "getchecksum",
-            "crc32",
+            # crc32 appears in ZipEntry but is too generic alone;
+            # dexfile is legitimately used for reflection-based class loading too.
+            # Keep the most specific only.
+            "dexcrc",
+            "dexintegrity",
+            "dex_checksum",
         ],
+        # messagedigest, sha256, md5, digest are cryptographic primitives used for
+        # network requests, password hashing, file storage — not specific to
+        # asset integrity. Removed to prevent massive false positives.
         "asset_integrity": [
-            "messagedigest",
-            "sha1",
-            "sha256",
-            "md5",
-            "digest",
+            "apkintegrity",
+            "verify_hash",
+            "integrity_check",
         ],
+        # getInstallerPackageName is called by Chromium BuildInfo, Firebase,
+        # Crashlytics, etc. for diagnostics — NOT install source gating.
+        # getInstallSourceInfo (API 30+) is the specific enforcement API.
         "installer_check": [
-            "getinstallerpackagename",
-            "installerpackage",
+            "getinstallsourceinfo",
+            "installsource_check",
         ],
         "debuggable_flag": [
+            # applicationinfo alone is too generic (icon, label, permissions, etc.)
             "flag_debuggable",
-            "applicationinfo",
+            "debuggable_check",
         ],
+        # getpackagename and equals are among the most common Java calls.
+        # Removed entirely — they produce false positives in 100% of apps.
         "package_name_check": [
-            "getpackagename",
-            "equals",
+            "expected_package",
+            "verify_package",
+            "validatepackagename",
         ],
     }
 

@@ -24,6 +24,7 @@ from static (Smali) artefacts.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -164,8 +165,11 @@ _PATTERNS: Dict[str, Dict[str, dict]] = {
     # ------------------------------------------------------------------
     "ANTI_INSTRUMENTATION": {
         "frida_detection": {
+            # Use surrounding double-quotes for bare "frida" to avoid matching
+            # substrings inside legitimate identifiers like "blackfriday"
+            # (present in TrustKit/OkHttp certificate-pinning configs).
             "keywords": [
-                "frida", "gum-js-loop", "libfrida", "frida-agent",
+                '"frida"', "gum-js-loop", "libfrida", "frida-agent",
                 "re.frida", "frida_agent_main", "frida-gadget",
             ],
             "subtype":    "Frida Detection",
@@ -225,23 +229,30 @@ _PATTERNS: Dict[str, Dict[str, dict]] = {
     # ------------------------------------------------------------------
     "ANTI_TAMPERING": {
         "signature_verification": {
+            # PRECISION NOTE: avoid raw Android API calls that are also used by
+            # third-party frameworks for non-security purposes:
+            #   - Signature;->toByteArray()  → Chromium WebView computes cert SHA256
+            #   - Signature;->hashCode()     → used as HashMap key in any code
+            #   - getPackageInfo(…GET_SIGNATURES) → Flutter ResourceExtractor timestamps
+            # Only keep identifiers that unambiguously indicate self-verification intent.
             "keywords": [
                 "signinginfo",
                 "hassigningcertificate",
                 "get_signing_certificates",
-                "signature;->tohashcode",
-                "signature;->tobytearray",
                 "signaturecheck",
                 "verifysignature",
                 "verify_apk_signature",
+                "expected_signature",
+                "stored_signature",
+                "apk_signature_check",
             ],
             "subtype":    "Package Signature Verification",
             "confidence": 0.87,
         },
         "dex_checksum": {
+            # getchecksum is too generic (ZipEntry.getCrc(), ZipFile.getChecksum(), etc.)
             "keywords": [
                 "dexcrc", "dexintegrity", "dex_checksum",
-                "getchecksum",
             ],
             "subtype":    "DEX Integrity Check",
             "confidence": 0.83,
@@ -255,10 +266,15 @@ _PATTERNS: Dict[str, Dict[str, dict]] = {
             "confidence": 0.74,
         },
         "installer_verification": {
+            # getInstallerPackageName alone is NOT sufficient — Chromium BuildInfo,
+            # Firebase, and crash reporters call it for diagnostics, not enforcement.
+            # Require the more specific API (getInstallSourceInfo, API 30+) which is
+            # only used for deliberate install-source gating.
             "keywords": [
                 "getinstallsourceinfo",
                 "install_source",
                 "installsource_check",
+                "verify_installer",
             ],
             "subtype":    "Install Source Verification",
             "confidence": 0.88,
@@ -328,11 +344,65 @@ _PATTERNS: Dict[str, Dict[str, dict]] = {
             "confidence": 0.55,
         },
         "telephony_check": {
+            # Generic telephony API — low confidence on its own.
+            # Pair with telephony_emulator_values for high-confidence detection.
             "keywords": [
                 "getsubscriberid",
             ],
             "subtype":    "Telephony / IMEI Validation",
             "confidence": 0.55,
+        },
+        "telephony_emulator_values": {
+            # Hardcoded emulator-specific telephony values that apps compare
+            # against to decide they are running in an emulator.
+            # Keywords include surrounding double-quotes so they only match smali
+            # const-string literals, NOT numeric hex constants like
+            # 0x4000000000000000L which also happens to contain 15 zeros.
+            #   - "000000000000000"  : AVD default IMEI (15 zeros)
+            #   - "15555218135"      : AVD default phone number  
+            #   - "310260000000000"  : AVD default subscriber ID
+            #   - "+12125551212"     : another known emulator phone
+            "keywords": [
+                '"000000000000000"',
+                '"15555218135"',
+                '"310260000000000"',
+                '"+12125551212"',
+            ],
+            "subtype":    "Telephony Emulator Value Check",
+            "confidence": 0.88,
+        },
+        "network_emulator_check": {
+            # Emulator-specific network addresses used by apps to detect QEMU/AVD.
+            # Keywords include surrounding double-quotes so they only match smali
+            # const-string literals, not arbitrary numeric sequences.
+            #   - "10.0.2.2"     : host loopback route in Android Emulator
+            #   - "10.0.2.15"    : emulator default gateway
+            #   - "10.0.2.1"     : DNS server in emulator network
+            "keywords": [
+                '"10.0.2.2"',
+                '"10.0.2.15"',
+                '"10.0.2.1"',
+            ],
+            "subtype":    "Network Emulator Address Check",
+            "confidence": 0.80,
+        },
+        "hardware_property_check": {
+            # Explicit comparisons against hardware property values that are
+            # unique to emulators/virtualized environments.
+            "keywords": [
+                "vbox86",
+                "ttVM_x86",
+                "Andy",
+                "Droid4X",
+                "x86_64",
+                "youwave",
+                "ro.hardware",
+                "ro.product.board",
+                "ro.product.device",
+                "ro.build.hardware",
+            ],
+            "subtype":    "Hardware Property Emulator Check",
+            "confidence": 0.72,
         },
         "nox_memu_detection": {
             "keywords": [
@@ -473,19 +543,59 @@ _PATTERNS: Dict[str, Dict[str, dict]] = {
 # Scanner
 # ---------------------------------------------------------------------------
 
+# Regex to strip the leading "smali*/" directory component from a relative
+# file path, e.g. "smali_classes2/org/chromium/…" → "org/chromium/…".
+# This ensures third-party prefix exclusions work across ALL dex shards
+# (smali/, smali_classes2/, smali_classes3/, …).
+_SMALI_DIR_RE = re.compile(r'^smali[^/]*/')
+
 # Third-party / framework prefixes — skip to reduce false positives.
+# IMPORTANT: Chromium WebView (org/chromium/) and Flutter framework (io/flutter/)
+# embed Android platform APIs (Signature, PackageManager, etc.) for their own
+# diagnostics/certificate-display purposes, NOT for app-level ARA protection.
+# Including them caused false positives on signature_verification and
+# installer_verification in apps that have zero anti-tampering.
 _THIRD_PARTY_PREFIXES = (
+    # Android Jetpack / Kotlin stdlib
     "androidx/", "kotlin/", "kotlinx/",
     "android/support/", "android/compose/",
-    "com/google/android/gms/", "com/google/firebase/",
-    "com/google/android/play/",
+    # Google Play Services / Firebase / Material / all Google Android libraries.
+    # Using the broad "com/google/android/" prefix catches Material Components,
+    # Play Services, CameraX, etc. in one rule.
+    "com/google/android/", "com/google/firebase/",
     "com/google/gson/", "com/google/protobuf/",
+    # Networking / IO libraries
     "okhttp3/", "okio/", "retrofit2/",
     "com/squareup/", "com/bumptech/glide/",
     "io/reactivex/", "io/realm/",
+    # Apache / JSON stdlib
     "org/apache/", "org/json/",
+    # Analytics / crash reporting SDKs
     "com/facebook/", "com/crashlytics/",
     "com/adjust/sdk/", "com/appsflyer/",
+    # Chromium WebView — uses Signature/PackageManager for certificate display
+    # and build-info collection, not ARA protection.
+    "org/chromium/",
+    # Flutter framework — ResourceExtractor uses getPackageInfo for file
+    # timestamp management, not signature verification.
+    "io/flutter/",
+    # Other common embedded runtimes / engines
+    "com/unity3d/",
+    "org/webrtc/",
+    "tv/danmaku/",
+    "com/microsoft/appcenter/",
+    # SSL pinning / certificate-transparency SDKs — they contain Frida/Xposed
+    # package name strings for their own instrumentation detection, but the
+    # library itself is not an ARA mechanism inside the app under test.
+    "com/datatheorem/android/trustkit/",
+    "com/nimbusds/jwt/",
+    "net/grandcentrix/tray/",
+    # Certificate Transparency library — verifier contains signature-related
+    # method names for CT log validation, not app-level anti-tampering.
+    "com/appmattus/",
+    # OkHttp certificate pinner (contains host strings that can resemble keywords)
+    "okhttp3/CertificatePinner",
+    "okhttp3/internal/tls/",
 )
 
 # Root-detection libraries that store hook-framework package names as
@@ -562,13 +672,18 @@ class SmaliARAScanner:
                     continue
                 fpath = os.path.join(root_str, fname)
 
-                # Skip third-party / framework files
+                # Skip third-party / framework files.
+                # `rel` may start with "smali/", "smali_classes2/", etc.
+                # Strip that leading smali-directory component so prefix rules
+                # like "org/chromium/" work for ALL dex classes (not just the
+                # primary smali/ directory).
                 rel = fpath[len(smali_root):].lstrip("/")
-                if any(rel.startswith(p) for p in _THIRD_PARTY_PREFIXES):
+                rel_pkg = _SMALI_DIR_RE.sub("", rel)
+                if any(rel_pkg.startswith(p) for p in _THIRD_PARTY_PREFIXES):
                     continue
 
                 # Detect root-detection library paths
-                is_root_lib = any(rel.startswith(p) for p in _ROOT_LIBRARY_PREFIXES)
+                is_root_lib = any(rel_pkg.startswith(p) for p in _ROOT_LIBRARY_PREFIXES)
 
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as fh:

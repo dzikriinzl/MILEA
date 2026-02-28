@@ -13,12 +13,15 @@ class EmulatorSignalScanner:
     """
 
     SIGNALS = {
-        # Build properties
+        # Build property VALUE checks – only emulator-specific values
+        # (omit generic property-read APIs like "ro.build.fingerprint" and
+        #  "ro.product.model" that appear in every app via analytics/crash SDKs)
         "build_fingerprint": [
             "goldfish",
             "ranchu",
-            "ro.build.fingerprint",
-            "ro.product.model",
+            "sdk_gphone",
+            "generic_x86",
+            "generic_arm",
         ],
 
         "test_keys": [
@@ -26,16 +29,16 @@ class EmulatorSignalScanner:
             "test_keys",
         ],
 
-        # Generic indicators
+        # Generic brand indicators
         "generic_brand": [
             "generic_x86",
             "generic_arm",
         ],
 
-        # SDK string
+        # SDK string value matches
         "sdk_string": [
-            "android sdk",
             "sdk_google",
+            "android_sdk_built_for_x86",
         ],
 
         # QEMU properties
@@ -44,16 +47,17 @@ class EmulatorSignalScanner:
             "ro.property.product.model",
         ],
 
-        # Hardware artifacts
+        # QEMU/goldfish hardware artifacts (value-specific, not property reads)
         "goldfish_driver": [
             "goldfish",
             "ranchu",
         ],
 
-        # Emulator pipes
+        # Emulator pipes (highly specific to QEMU/Android emulator)
         "emulator_pipe": [
             "/dev/qemu_pipe",
             "qemud",
+            "/dev/socket/qemud",
         ],
     }
 

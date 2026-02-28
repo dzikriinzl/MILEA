@@ -262,13 +262,18 @@ class DynamicReport:
 
 _LOGCAT_ARA_PATTERNS = {
     # ── Root detection ─────────────────────────────────────────────────────────
-    # Match app-emitted root detection messages (broad: real apps use varied terms)
-    r"root.{0,20}detect|root.{0,15}check|root.{0,10}found|is.?rooted|device.{0,10}root": {
+    # Match app-emitted root detection messages.
+    # \broot ensures we do NOT match Android framework classes like ViewRootImpl
+    # whose classname embeds "Root" as part of a compound word (not a word boundary).
+    # Trailing \b omitted on the device.{0,10} branch: "rooted" has word-char after 't'.
+    r"\broot.{0,20}detect|\broot.{0,15}check|\broot.{0,10}found|is.?rooted|device.{0,10}\broot": {
         "category": "ROOT_DETECTION", "subtype": "Root Detection Logged by App",
         "technique": "logcat_root_detect", "confidence": 0.82,
     },
-    # su binary — paths and check patterns
-    r"su.{0,10}binary|/system/bin/su|/system/xbin/su|/sbin/su|which.{0,5}su": {
+    # su binary — paths and check patterns.
+    # Use \b word boundary on "su" to avoid matching "issue", "resume", etc.
+    # "/sbin/su" literal paths kept as-is (no ambiguity there).
+    r"\bsu\b.{0,10}binary|/system/bin/su|/system/xbin/su|/sbin/su|\bwhich\b.{0,5}\bsu\b": {
         "category": "ROOT_DETECTION", "subtype": "SU Binary Check Logged",
         "technique": "logcat_su_binary", "confidence": 0.85,
     },
@@ -1034,7 +1039,7 @@ class DynamicAnalyzer:
             "securityexception",
             "sslhandshakeexception", "ssl_pin", "certificate.*pin",
             "tampering", "tamper_detect", "integrity_check",
-            "root_check", "root detection", "root.*check", "is.?rooted",
+            "root_check", "root detection", "\broot.{0,10}check", "is.?rooted",
             "su binary", "su.{0,5}binary", "/xbin/su", "/bin/su",
             "rootbeer", "magisk", "roothide",
             "safetynet", "playintegrity", "attestation",

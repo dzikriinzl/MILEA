@@ -70,6 +70,13 @@ class BypassDifficultyEstimator:
             score += 1
             reasons.append("integrity enforcement detected")
 
+        # Emulator detection with multiple vectors is meaningfully harder to bypass
+        # than a single property check.  >= 2 distinct techniques earns +2 so
+        # that well-implemented emulator detection reaches MEDIUM (score >= 4).
+        if category == "EMULATOR_DETECTION" and len(subtypes) >= 2:
+            score += 2
+            reasons.append("multi-vector emulator environment detection")
+
         # -------------------------
         # Final difficulty mapping
         # -------------------------

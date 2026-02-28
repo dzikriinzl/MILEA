@@ -21,10 +21,12 @@ class AntiInstrumentationSignalScanner:
         ],
 
         # Debugger checks
+        # "debugger" as a bare string appears in log tags, variable names, and
+        # BuildConfig comments in virtually every debug build — removed.
         "debugger_check": [
             "isdebuggerconnected",
             "debug.waitingfordebugger",
-            "debugger",
+            "debug.isdebuggable",
         ],
 
         # ptrace based detection
@@ -34,17 +36,23 @@ class AntiInstrumentationSignalScanner:
         ],
 
         # /proc based detection
+        # "/proc/" alone is too generic — it appears in file utilities, log readers,
+        # and system diagnostics. Only keep the specific security-relevant entries.
         "proc_tracerpid": [
             "tracerpid",
             "/proc/self/status",
-            "/proc/",
+            "/proc/self/maps",
         ],
 
         # Timing / delay tricks
+        # PRECISION NOTE: System.nanoTime(), currentTimeMillis(), and
+        # SystemClock.elapsedRealtime() appear in virtually every Android app
+        # (animation, profiling, request timing, etc.) — they are NOT specific to
+        # anti-instrumentation. Only keep the Debug-class timing variant which is
+        # exclusively a profiling/debugger-interaction API.
         "timing_check": [
-            "systemclock.elapsedrealtime",
-            "nanotime",
-            "currenttimemillis",
+            "debug.threadcputimenas",
+            "debug;->threadcputimenanos",
         ],
     }
 

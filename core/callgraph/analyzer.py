@@ -41,28 +41,54 @@ logger = logging.getLogger(__name__)
 # AndroidX, Kotlin, GMS, and popular libraries contain normal API usage
 # (Build.FINGERPRINT, PackageManager.getPackageInfo, TelephonyManager, etc.)
 # that the atom registry would misclassify as ARA techniques.
+# IMPORTANT: Keep this list in sync with core/strategy/smali_ara_scanner.py
 _THIRD_PARTY_PREFIXES = (
+    # Android Jetpack / Kotlin stdlib
     "androidx/", "kotlin/", "kotlinx/",
     "android/support/", "android/compose/",
-    "com/google/android/gms/", "com/google/firebase/",
-    "com/google/android/play/",
+    # Google Play Services / Firebase / Material / all Google Android libraries
+    "com/google/android/", "com/google/firebase/",
     "com/google/gson/", "com/google/protobuf/",
+    # Networking / IO libraries
     "okhttp3/", "okio/", "retrofit2/",
     "com/squareup/", "com/bumptech/glide/",
     "io/reactivex/", "io/realm/",
+    # Apache / JSON stdlib
     "org/apache/", "org/json/",
+    # Analytics / crash reporting SDKs
     "com/facebook/", "com/crashlytics/",
     "com/adjust/sdk/", "com/appsflyer/",
+    # Chromium WebView — uses Signature/PackageManager for certificate display
+    # and build-info collection, not ARA protection.
+    "org/chromium/",
+    # Flutter framework — ResourceExtractor uses getPackageInfo for file
+    # timestamp management, not signature verification.
+    "io/flutter/",
+    # Other common embedded runtimes / engines
+    "com/unity3d/",
+    "org/webrtc/",
+    "tv/danmaku/",
+    "com/microsoft/appcenter/",
+    # SSL pinning / certificate-transparency SDKs
+    "com/datatheorem/android/trustkit/",
+    "com/nimbusds/jwt/",
+    "net/grandcentrix/tray/",
+    # Certificate Transparency library — verifier contains signature-related
+    # method names for CT log validation, not app-level anti-tampering.
+    "com/appmattus/",
+    # OkHttp certificate pinner
+    "okhttp3/CertificatePinner",
+    "okhttp3/internal/tls/",
 )
 
 # Root-detection libraries whose const-string lists include hook-framework
 # package names.  Matches inside these paths must NOT produce
-# ANTI_INSTRUMENTATION findings — the strings are used *for* root detection.
+# ANTI_INSTRUMENTATION (AH) findings — the strings are used *for* root
+# detection, not for anti-hooking protection.
 _ROOT_LIBRARY_PREFIXES = (
     "com/scottyab/rootbeer",
     "com/kimchangyoun/rootbeerFresh",
-    "com/scottyab/rootchecker",
-    "rootdetection/",
+    "com/kimchangyoun/rootbeer",
     "rootchecker/",
 )
 
@@ -447,8 +473,8 @@ class CallGraphAnalyzer:
             if first_hit is None:
                 continue
 
-            # Suppress AH findings from root-detection libraries
-            if match.category == "AH":
+            # Suppress ANTI_INSTRUMENTATION findings from root-detection libraries
+            if match.category == "ANTI_INSTRUMENTATION":
                 hit_path = (first_hit.file or "").replace(".", "/")
                 class_path = (first_hit.class_name or "").replace(".", "/")
                 if any(
